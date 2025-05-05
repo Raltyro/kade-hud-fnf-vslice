@@ -1,0 +1,354 @@
+// this is not getting updated anymore hopefully
+
+import funkin.play.PlayState;
+
+import funkin.play.scoring.Scoring;
+import funkin.modding.module.Module;
+import funkin.util.tools.StringTools;
+import funkin.util.Constants;
+import funkin.ui.options.OptionsState;
+import funkin.ui.options.PageName;
+import funkin.Highscore;
+import funkin.Paths;
+import funkin.Preferences;
+
+import flixel.tweens.FlxEase;
+import flixel.tweens.FlxTween;
+import flixel.text.FlxTextBorderStyle;
+import flixel.text.FlxText;
+import flixel.math.FlxMath;
+import flixel.util.FlxSpriteUtil;
+import flixel.util.FlxStringUtil;
+import flixel.util.FlxSave;
+import flixel.ui.FlxBar;
+import flixel.FlxSprite;
+import flixel.FlxG;
+
+import Std;
+import Math;
+
+class KadeHUDModule extends Module {
+	var save;
+	var showNPS = false;
+	var showTapMisses = true;
+	var accHoldToAcc = true;
+	var showTimer = true;
+	var showSongInfo = true;
+
+	function initSave() {
+		if (save != null) return;
+		save = new FlxSave();
+		save.bind("kadehudvslice", "Raltyro");
+
+		// fashionably stupid
+		if (save.data.showNPS == null) save.data.showNPS = showNPS; else showNPS = save.data.showNPS;
+		if (save.data.showTapMisses == null) save.data.showTapMisses = showTapMisses; else showTapMisses = save.data.showTapMisses;
+		if (save.data.accHoldToAcc == null) save.data.accHoldToAcc = accHoldToAcc; else accHoldToAcc = save.data.accHoldToAcc;
+		if (save.data.showTimer == null) save.data.showTimer = showTimer; else showTimer = save.data.showTimer;
+		if (save.data.showSongInfo == null) save.data.showSongInfo = showSongInfo; else showSongInfo = save.data.showSongInfo;
+	}
+
+	public function new() {
+		super("Kade HUD", 1);
+		Constants.STRUMLINE_Y_OFFSET = 42;
+
+		initSave();
+	}
+
+	var state;
+	var inPlay = false;
+	var inOptions = false;
+
+	override function onStateChangeBegin(ev:ScriptEvent) {
+		super.onStateChangeBegin(ev);
+		inPlay = false;
+	}
+
+	override function onStateChangeEnd(ev:ScriptEvent) {
+		super.onStateChangeEnd(ev);
+		var wasOptions = inOptions;
+
+		state = ev.targetState;
+		if (inPlay = Std.isOfType(state, PlayState)) onPlayStateEnter();
+		else if (inOptions = Std.isOfType(state, OptionsState)) {
+			initSave(); // if it was deleted accidentally onDestroy in Play, create it again
+
+			var prefs = state.pages.get(PageName.Preferences);
+			prefs.createPrefItemCheckbox("Notes per Second", "", function(value) {
+				showNPS = save.data.showNPS = value;
+			}, save.data.showNPS);
+
+			prefs.createPrefItemCheckbox("Tap Misses in Score Text", "", function(value) {
+				showTapMisses = save.data.showTapMisses = value;
+			}, save.data.showTapMisses);
+
+			prefs.createPrefItemCheckbox("Account Hold to Acc", "", function(value) {
+				accHoldToAcc = save.data.accHoldToAcc = value;
+			}, save.data.accHoldToAcc);
+
+			prefs.createPrefItemCheckbox("Timer Bar", "", function(value) {
+				showTimer = save.data.showTimer = value;
+			}, save.data.showTimer);
+
+			prefs.createPrefItemCheckbox("Song Info Counter", "", function(value) {
+				showSongInfo = save.data.showSongInfo = value;
+			}, save.data.showSongInfo);
+		}
+
+		if (wasOptions && !inOptions) save.flush();
+	}
+
+	override function onDestroy(ev:ScriptEvent) {
+		super.onDestroy(ev);
+		cleanup();
+
+		if (save != null && !inPlay) {
+			save.close();
+			save.destroy();
+			save = null;
+		}
+	}
+
+	var scoreText;
+	var kadeText;
+	var songPosOutline;
+	var songPosBar;
+	var songPosText;
+
+	function cleanup() {
+		if (scoreText != null) {
+			scoreText.destroy();
+			scoreText = null;
+		}
+		if (kadeText != null) {
+			kadeText.destroy();
+			kadeText = null;
+		}
+		if (songPosOutline != null) {
+			songPosOutline.destroy();
+			songPosOutline = null;
+		}
+		if (songPosBar != null) {
+			songPosBar.destroy();
+			songPosBar = null;
+		}
+		if (songPosText != null) {
+			songPosText.destroy();
+			songPosText = null;
+		}
+	}
+
+	var prevCombos:Int = 0;
+	var score:Float = 0;
+	var maxScore:Float = 0;
+	var ghostMissed:Int = 0;
+	var comboBreaks:Int = 0;
+	var lastSongPos:Float = 0;
+	var npsReqs:Array<Float> = [];
+
+	function onPlayStateEnter() {
+		maxScore = 0;
+		ghostMissed = 0;
+		comboBreaks = 0;
+		score = 0;
+		prevCombos = 0;
+		lastSongPos = state.conductorInUse.songPosition;
+		npsReqs.resize(0);
+
+		cleanup();
+		state.playerStrumline.x = FlxG.width / 1.333333333 - state.playerStrumline.width / 2;
+		state.opponentStrumline.x = FlxG.width / 4 -  state.opponentStrumline.width / 2;
+
+		scoreText = state.scoreText;
+		state.scoreText = new FlxText();
+		state.scoreText.visible = false;
+
+		if (showSongInfo) {
+			kadeText = new FlxText(8, FlxG.height - 28 - 16, 0, state.currentChart.songArtist + "\n" + state.currentChart.songName + " - " + StringTools.toTitleCase(state.currentDifficulty), 20);
+			kadeText.setFormat(Paths.font("vcr.ttf"), 16, -1, "left", FlxTextBorderStyle.OUTLINE_FAST, -16777216);
+			kadeText.scrollFactor.x = 0; kadeText.scrollFactor.y = 0;
+			kadeText.zIndex = 802;
+			kadeText.cameras = [state.camHUD];
+			state.add(kadeText);
+		}
+
+		if (showTimer) {
+			songPosBar = new FlxBar(390, Preferences.downscroll ? FlxG.height - 24 - 25 : 24, null, 500, 25);
+			songPosBar.alpha = 0;
+			songPosBar.scrollFactor.x = 0; songPosBar.scrollFactor.y = 0;
+			songPosBar.createGradientBar([0xFF000000], [Constants.COLOR_HEALTH_BAR_GREEN, Constants.COLOR_HEALTH_BAR_RED]);
+			songPosBar.numDivisions = 800;
+			songPosBar.zIndex = 802;
+
+			songPosOutline = new FlxSprite(songPosBar.x - 4, songPosBar.y - 4).makeGraphic(1, 1, 0xFF000000);
+			songPosOutline.scale.x = songPosBar.width + 8; songPosOutline.scale.y = songPosBar.height + 8;
+			songPosOutline.alpha = 0;
+			songPosOutline.zIndex = 801;
+			songPosOutline.updateHitbox();
+
+			songPosText = new FlxText(0, songPosOutline.y + ((songPosBar.height - 15) / 2), 0, "", 20);
+			songPosText.alpha = 0;
+			songPosText.setFormat(Paths.font("vcr.ttf"), 20, -1, "left", FlxTextBorderStyle.OUTLINE_FAST, -16777216);
+			songPosText.scrollFactor.x = 0; songPosText.scrollFactor.y = 0;
+			songPosText.zIndex = 803;
+			songPosText.borderSize = 2;
+
+			songPosText.cameras = songPosBar.cameras = songPosOutline.cameras = [state.camHUD];
+
+			if (requestSongPos) {
+				addSongPos();
+				requestSongPos = false;
+			}
+		}
+		else requestSongPos = false;
+	}
+
+	var requestSongPos = false;
+	function addSongPos() {
+		state.add(songPosOutline);
+		state.add(songPosBar);
+		state.add(songPosText);
+		FlxTween.tween(songPosText, {alpha: 1}, 1, {ease: FlxEase.circOut});
+		FlxTween.tween(songPosBar, {alpha: 1}, 1, {ease: FlxEase.circOut});
+		FlxTween.tween(songPosOutline, {alpha: 1}, 1, {ease: FlxEase.circOut});
+	}
+
+	override function onSongRetry(ev:ScriptEvent) {
+		super.onSongRetry(ev);
+		score = 0;
+		maxScore = 0;
+		ghostMissed = 0;
+		comboBreaks = 0;
+		prevCombos = 0;
+		lastSongPos = state.conductorInUse.songPosition;
+	}
+
+	override function onCountdownEnd(ev:ScriptEvent) {
+		super.onCountdownEnd(ev);
+		if (!inPlay) requestSongPos = true;
+		else if (songPosBar != null) addSongPos();
+	}
+
+	override function onUpdate(ev:ScriptEvent) {
+		super.onUpdate(ev);
+		if (!inPlay) return;
+
+		if (prevCombos > 0 && Highscore.tallies.combo <= Math.min(prevCombos, 0)) comboBreaks++;
+		prevCombos = Highscore.tallies.combo;
+
+		var songPos = state.conductorInUse.songPosition;
+		if (showNPS) {
+			var i = 0;
+			while (i < npsReqs.length) {
+				npsReqs[i] -= ev.elapsed;
+				if (npsReqs[i] <= 0) npsReqs.splice(i, 1);
+				else i++;
+			}
+		}
+
+		if (accHoldToAcc) {
+			score = state.songScore;
+			for (note in state.playerStrumline.holdNotes.group.members) {
+				if (note != null && note.alive && songPos > note.strumTime) {
+					maxScore += Constants.SCORE_HOLD_BONUS_PER_SECOND * Math.max(
+						Math.min(Math.max(songPos, note.strumTime), note.strumTime + note.sustainLength) -
+						Math.min(Math.max(lastSongPos, note.strumTime), note.strumTime + note.sustainLength)
+					, 0) / 1000;
+				}
+			}
+		}
+
+		updateScoreText();
+
+		if (songPosBar != null) {
+			songPosText.text = state.currentChart.songName + " (" + FlxStringUtil.formatTime((state.currentSongLengthMs - songPos) / 1000, false) + ")";
+			songPosText.x = songPosBar.x + songPosBar.width / 2 - songPosText.width / 2;
+			songPosBar.value = (songPos / state.currentSongLengthMs) * 100;
+			songPosBar.updateBar();
+		}
+
+		lastSongPos = songPos;
+	}
+
+	override function onNoteHit(ev:ScriptEvent) {
+		super.onNoteHit(ev);
+		if (!inPlay || ev.healthChange == 0) return;
+
+		maxScore += Scoring.PBOT1_MAX_SCORE;
+		if (!accHoldToAcc) score += ev.score;
+		if (showNPS) npsReqs.push(1);
+	}
+
+	override function onNoteMiss(ev:ScriptEvent) {
+		super.onNoteHit(ev);
+		if (!inPlay || ev.healthChange == 0) return;
+
+		maxScore += Scoring.PBOT1_MAX_SCORE;
+		comboBreaks++; prevCombos = Highscore.tallies.combo;
+	}
+
+	override function onNoteGhostMiss(ev:ScriptEvent) {
+		super.onNoteHit(ev);
+		if (!inPlay || ev.healthChange == 0) return;
+
+		ghostMissed++;
+	}
+
+	static var wifeConditions:Array<Array<Dynamic>> = [
+		[99.9935, "AAAAA"],
+		[99.980, "AAAA:"],
+		[99.970, "AAAA."],
+		[99.955, "AAAA"],
+		[99.90, "AAA:"],
+		[99.80, "AAA."],
+		[99.70, "AAA"],
+		[99, "AA:"],
+		[96.50, "AA."],
+		[93, "AA"],
+		[90, "A:"],
+		[85, "A."],
+		[80, "A"],
+		[70, "B"],
+		[60, "C"]
+	];
+
+	function getRating(acc:Float):String {
+		var tallies = Highscore.tallies, misses = ghostMissed + comboBreaks;
+		var fc;
+		if (misses > 0) fc = misses >= 10 ? "Clear" : "SDCB";
+		else {
+			if (tallies.bad > 0 || tallies.shits > 0) fc = "FC";
+			else if (tallies.good > 0) fc = "GFC";
+			else if (tallies.sick > 0) fc = "SFC";
+			else fc = "N/A";
+		}
+
+		var rating = "D";
+		for (b in wifeConditions) {
+			if (b[0] < acc) {
+				rating = b[1];
+				break;
+			}
+		}
+		return "(" + fc + ") " + rating;
+	}
+
+	function updateScoreText() {
+		//var tallies = Highscore.tallies;
+		//var notes = tallies.sick + (tallies.good * 0.785) + (tallies.bad * 0.65) + (tallies.shit * 0.3);
+		// (notes / (tallies.totalNotesHit + tallies.missed)
+		var acc = maxScore < 1 ? 0 : (score / maxScore) * 100;
+
+		scoreText.text =
+			(showNPS ? ("NPS: " + npsReqs.length + " | ") : "") +
+			"Score: " + state.songScore +
+			((!showTapMisses || ghostMissed == 0) ?
+				(" | Combo Breaks: " + (comboBreaks + ghostMissed)) :
+				(" | (Tap Misses: " + ghostMissed + ") Breaks: " + comboBreaks)
+			) +
+			" | Accuracy: " + Math.floor(acc * 100) / 100 +
+			"% | " + getRating(acc);
+
+		scoreText.setPosition(state.healthBar.x + state.healthBar.width / 2 - scoreText.width / 2, state.healthBar.y + 33);
+	}
+}
