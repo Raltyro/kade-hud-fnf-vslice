@@ -1,8 +1,16 @@
 {
-	"title": "kadeengine hud",
+	"title": "Kade Engine BoloVevo HUD",
 	"description": "kade engine ghudbad",
-	"author": "raltyro",
-	"api_version": "0.1.0",
-	"mod_version": "1.1.0",
+	"homepage": "https://gamebanana.com/mods/510941",
+	"author": "Raltyro",
+	"contributors": [
+		{"name": "Raltyro", "role": "Author", "url": "https://gamebanana.com/members/1777465"},
+		{"name": "Boloxd aka. BoloVevo", "role": "HUD from their Fork & Kade Timing Text", "url": "https://gamebanana.com/members/1901964"},
+		{"name": "KadeDeveloper", "role": "HUD from his Engine", "url": "https://gamebanana.com/members/1774971"},
+		{"name": "Nebula_Zorua", "role": "Special Thanks (help)", "url": "https://gamebanana.com/members/1775208"},
+		{"name": "crowplexus", "role": "Special Thanks (help)", "url": "https://gamebanana.com/members/1826888"}
+	],
+	"api_version": "0.5.0",
+	"mod_version": "1.2.0",
 	"license": "CC BY 4.0,MIT"
 }
