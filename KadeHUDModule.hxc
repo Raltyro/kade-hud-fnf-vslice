@@ -20,11 +20,14 @@
 
 import funkin.graphics.FunkinSprite;
 import funkin.modding.module.Module;
+import funkin.play.notes.notestyle.NoteStyle;
+import funkin.play.notes.notestyle.ScriptedNoteStyle;
 import funkin.play.scoring.Scoring;
 import funkin.play.PlayState;
 import funkin.ui.options.OptionsState;
 import funkin.ui.options.OptionsMenu;
 import funkin.ui.options.PreferencesMenu;
+import funkin.ui.mainmenu.MainMenuState;
 import funkin.util.Constants;
 import funkin.Conductor;
 import funkin.Highscore;
@@ -81,6 +84,7 @@ class KadeHUDModule extends Module {
 		if (save.data.showSongInfo == null) save.data.showSongInfo = true;
 		if (save.data.showTiming == null) save.data.showTiming = false;
 		if (save.data.centerStrums == null) save.data.centerStrums = true;
+		if (save.data.perfectRating == null) save.data.perfectRating = true;
 	}
 
 	/**
@@ -106,6 +110,7 @@ class KadeHUDModule extends Module {
 	 */
 	function buildModPreferencesMenu():PreferencesMenu {
 		var menu:PreferencesMenu = new PreferencesMenu();
+		initSave();
 
 		// Destroy a pre-built Preferences Menu then make our own.
 		for (item in menu.items) item.destroy();
@@ -118,6 +123,9 @@ class KadeHUDModule extends Module {
 
 		menu.createPrefItemCheckbox("Enable Kade HUD", "Enables this Kade Engine HUD Mod.",
 			(value) -> save.data.enabled = value, save.data.enabled);
+
+		menu.createPrefItemCheckbox("Show Perfect Rating", "If enabled, Perfect Timing will be shown seperately as a judgement.",
+			(value) -> save.data.perfectRating = value, save.data.perfectRating);
 
 		menu.createPrefItemCheckbox("Simple Accuracy", "Changes how the accuracy will display depending on how simple it is on this setting.",
 			(value) -> save.data.simpleAcc = value, save.data.simpleAcc);
@@ -153,40 +161,48 @@ class KadeHUDModule extends Module {
 	 * Dynamic in customItems is {index:Int, label:String, callback:Void->Void, ?fireInstantly:Bool}
 	 */
 	function addCustomOptionItems(options:OptionsMenu, customItems:Array<Dynamic>) {
-		var length = options.items.length + customItems.length;
+		// Try to atleast fix the OptionsMenu first.
+		if (!options.hasMultipleOptions()) {
+			trace("this OptionsMenu's is weird! trying to atleast fix it somehow.");
+			options.codex.setPage("options");
 
-		var items = [], requestIndices:Map<Int, Array<Int>> = [-1 => []];
-		for (dyn in customItems) {
-			var item = options.createItem(dyn.label, dyn.callback, dyn.fireInstantly);
-			options.items.remove(item, true);
+			var exitToMainMenuCallback = state.exitToMainMenu;
+			if (exitToMainMenuCallback != null) exitToMainMenuCallback = () -> {
+				options.codex.currentPage.enabled = false;
+				FlxG.switchState(() -> new MainMenuState());
+			};
+			options.onExit.add(exitToMainMenuCallback);
 
-			if (!requestIndices.exists(dyn.index)) requestIndices.set(dyn.index, [items.length]);
-			else requestIndices.get(dyn.index).push(items.length);
-
-			items.push(item);
+			if (options.items.getItem("EXIT") == null) customItems.push({index: 999999, label: "EXIT", callback: options.exit});
 		}
 
-		var members = options.items.members;
-		var id = 0, y = (FlxG.height - length * 100) * 0.5 - 90;
+		var items = [], requestIndices:Map<Int, Array<Int>> = [-1 => []], length = options.items.length + customItems.length, id = 0, item;
+		for (dyn in customItems) {
+			items.push(item = options.createItem(dyn.label, dyn.callback, dyn.fireInstantly));
+			options.items.remove(item, true);
 
+			var reqIdx = (dyn.index > length) ? length : dyn.index;
+			if (!requestIndices.exists(reqIdx = (reqIdx > 0) ? reqIdx : 0)) requestIndices.set(reqIdx, [id++]);
+			else requestIndices.get(reqIdx).push(id++);
+		}
+
+		var members = options.items.members, y = (FlxG.height - length * 100) * 0.5 - 90;
 		function checkRequestIndices() if (requestIndices.exists(id)) for (itemID in requestIndices.get(id)) {
-			var item = items[itemID];
-			item.y = y += 100;
+			(item = items[itemID]).y = y += 100;
 
-			if (id == options.items.selectedIndex && members[id] != null) {
-				members[id].idle();
+			if (id == options.items.selectedIndex) {
 				item.select();
+				if (members[id] != null) members[id].idle();
 			}
 
 			options.items.insert(id++, item);
 			checkRequestIndices();
 		}
 
+		id = 0;
 		while (id < length) {
 			checkRequestIndices();
-
-			if (members[id] != null) members[id].y = y += 100;
-			id++;
+			if ((item = members[id++]) != null) item.y = y += 100;
 		}
 	}
 
@@ -201,7 +217,6 @@ class KadeHUDModule extends Module {
 	 */
 	var state:FlxState;
 	var inPlay:Bool = false;
-	var inOptions:Bool = false;
 
 	override function onStateChangeBegin(e:StateChangeScriptEvent) {
 		inPlay = false;
@@ -213,12 +228,10 @@ class KadeHUDModule extends Module {
 
 		// Use Std.isOfType to check if this is PlayState or OptionsState.
 		if (Std.isOfType(state, PlayState)) onPlaystateEnter();
-		else if (inOptions = Std.isOfType(state, OptionsState)) {
-			initSave();
-
+		else if (Std.isOfType(state, OptionsState)) {
 			var options = state.optionsCodex.pages.get("options");
 			var modPreferences = state.optionsCodex.addPage("kadehud", buildModPreferencesMenu());
-			if (options.hasMultipleOptions()) modPreferences.onExit.add(() -> state.optionsCodex.switchPage("options"));
+			modPreferences.onExit.add(() -> modPreferences.codex.switchPage("options"));
 
 			addCustomOptionItems(options, [
 				{index: options.items.members.indexOf(options.items.getItem("PREFERENCES")) + 1,
@@ -228,6 +241,12 @@ class KadeHUDModule extends Module {
 	}
 
 	// funkin.modding.IScriptedClass.IPlayStateScriptedClass
+	/**
+	 * Just a disclaimer, because Modules starts first when events being dispatched, it's not sure if
+	 *  an event has been cancelled by other scripts after that.
+	 * 
+	 * So that's... fun...
+	 */
 
 	/**
 	 * These should be the variables for PlayState.
@@ -307,6 +326,7 @@ class KadeHUDModule extends Module {
 
 		// I imagine there would be competitive players using this shitty mod, so i'd like to cache the judgments to not cause any lag spikes.
 		for (rating in ["sick", "good", "bad", "shit"]) FunkinSprite.cacheTexture(state.comboPopUps.noteStyle.buildJudgementSpritePath(rating));
+		if (save.data.perfectRating) FunkinSprite.cacheTexture(state.comboPopUps.noteStyle.buildJudgementSpritePath("sick") + "2");
 
 		if (save.data.centerStrums) {
 			state.playerStrumline.x = FlxG.width * 0.75 - state.playerStrumline.width * 0.5;
@@ -321,7 +341,7 @@ class KadeHUDModule extends Module {
 		state.scoreText.visible = false;
 		state.scoreText.active = false;
 
-		updateScoreText();
+		changeScoreText();
 
 		if (save.data.showSongInfo) {
 			state.add(kadeText = new FlxText(18, FlxG.height - 50, 0, state.currentChart.songArtist + "\n" + state.currentChart.songName + " - " + FlxStringUtil.toTitleCase(state.currentDifficulty), 20));
@@ -394,7 +414,7 @@ class KadeHUDModule extends Module {
 	 * e.difficulty
 	 */
 	override function onSongRetry(e:SongRetryEvent) {
-		if (!save.data.enabled) return;
+		if (/*e.eventCanceled ||*/ !save.data.enabled) return;
 		resetStats();
 	}
 
@@ -402,9 +422,19 @@ class KadeHUDModule extends Module {
 	 * e.step
 	 */
 	override function onCountdownEnd(e:CountdownScriptEvent) {
-		if (!save.data.enabled) return;
+		if (/*e.eventCanceled ||*/ !save.data.enabled) return;
 		if (!inPlay) tweenSongPosNext = true;
 		else if (save.data.showTimer) tweenSongPos();
+	}
+
+	var doCheckNoteStyleTemp:Bool = false;
+	var tempNoteStyleFallback:String;
+	var tempNoteStyleSickPath:String;
+	var tempNoteStyleSickData:Dynamic;
+	function checkNoteStyleTemp() if (doCheckNoteStyleTemp) {
+		state.comboPopUps.noteStyle._data.fallback = tempNoteStyleFallback;
+		(state.comboPopUps.noteStyle._data.assets.judgementSick = tempNoteStyleSickData).assetPath = tempNoteStyleSickPath;
+		doCheckNoteStyleTemp = false;
 	}
 
 	/**
@@ -421,10 +451,7 @@ class KadeHUDModule extends Module {
 	 * e.healthChange
 	 */
 	override function onNoteHit(e:HitNoteScriptEvent) {
-		if (!inPlay || !save.data.enabled) return;
-
-		var note = e.note;
-		if (!note.noteData.getMustHitNote()) return;
+		if (/*e.eventCanceled ||*/ !inPlay || !save.data.enabled || !e.note.noteData.getMustHitNote()) return;
 
 		nps.push(1); // Adds a variable starting from 1 to nps array to indicate that a note has been hit.
 		maxScore += Scoring.PBOT1_MAX_SCORE; // Add the max score on note hit.
@@ -439,13 +466,34 @@ class KadeHUDModule extends Module {
 				case 'shit': score += Scoring.scoreNotePBOT1(Scoring.PBOT1_BAD_THRESHOLD);
 			}
 		}
-		else if (!save.data.accHoldToAcc) {
-			// If the current configuration do not account holds to accuracy, use the custom score instead.
+		else if (save.data.accHoldToAcc)
+			score = state.songScore;
+		else // If the current configuration do not account holds to accuracy, use the custom score instead.
 			score += e.score;
-		}
 
-		// Show the timing difference label if a note has hit.
+		// AGHH i don't like how to do this cuz like setting e.judgement is nono and makes gf to play drop down combo anim
+		if (save.data.perfectRating && e.score == Scoring.PBOT1_MAX_SCORE && e.judgement == "sick") {
+			var noteStyleData = state.comboPopUps.noteStyle._data;
+			if (doCheckNoteStyleTemp) {
+				noteStyleData.assets.judgementSick = tempNoteStyleSickData;
+				noteStyleData.fallback = tempNoteStyleFallback;
+			}
+			else if (doCheckNoteStyleTemp = (tempNoteStyleSickData = noteStyleData.assets.judgementSick) != null) {
+				tempNoteStyleSickPath = tempNoteStyleSickData.assetPath;
+				tempNoteStyleFallback = noteStyleData.fallback;
+				tempNoteStyleSickData.assetPath += "2";
+			}
+
+			state.comboPopUps.displayRating("sick");
+
+			noteStyleData.assets.judgementSick = null;
+			noteStyleData.fallback = null;
+		}
+		else
+			checkNoteStyleTemp();
+
 		if (save.data.showTiming) {
+			// Show the timing difference label if a note has hit.
 			timingText.setPosition(FlxG.width * 0.474 + 50 + state.comboPopUps.offsets[0], FlxG.height * 0.45 - 20 + state.comboPopUps.offsets[1]);
 			timingText.text = FlxMath.roundDecimal(e.hitDiff, 2) + "ms";
 			timingText.alpha = 1.0;
@@ -459,6 +507,8 @@ class KadeHUDModule extends Module {
 			if (timingTextTween != null) timingTextTween.cancel();
 			timingTextTween = FlxTween.tween(timingText, {alpha: 0}, 0.2, {startDelay: 0.1});
 		}
+
+		updateScoreText();
 	}
 
 	/**
@@ -468,15 +518,14 @@ class KadeHUDModule extends Module {
 	 * e.healthChange
 	 */
 	override function onNoteMiss(e:NoteScriptEvent) {
-		if (!inPlay || !save.data.enabled) return;
-
-		var note = e.note;
-		if (!note.noteData.getMustHitNote()) return;
+		if (/*e.eventCanceled ||*/ !inPlay || !save.data.enabled || !e.note.noteData.getMustHitNote()) return;
 
 		maxScore += Scoring.PBOT1_MAX_SCORE;
 		score -= 10; // this one is hardcoded...
 		prevCombos = Highscore.tallies.combo;
 		comboBreaks++;
+
+		if (save.data.simpleAcc || !save.data.accHoldToAcc) updateScoreText();
 	}
 
 
@@ -489,10 +538,19 @@ class KadeHUDModule extends Module {
 	 * e.playAnim
 	 */
 	override function onNoteGhostMiss(e:GhostMissNoteScriptEvent) {
-		if (!inPlay || !save.data.enabled) return;
+		if (/*e.eventCanceled ||*/ !inPlay || !save.data.enabled) return;
 
 		score += e.scoreChange;
 		tapMissed++;
+
+		updateScoreText();
+	}
+
+	function updateScoreText() {
+		if (lastScore != score || lastMaxScore != maxScore) changeScoreText();
+
+		lastScore = score;
+		lastMaxScore = maxScore;
 	}
 
 	/**
@@ -508,24 +566,19 @@ class KadeHUDModule extends Module {
 
 		if (save.data.showNPS) {
 			var i = nps.length;
-			while (i-- > 0) if ((nps[i] -= elapsed) < 0) {
-				// FlxArrayUtil.swapAndPop is inlined
-				nps[i] = nps[nps.length - 1]; // swap element to remove and last element
+			while (i-- > 0) if ((nps[i] -= elapsed) < 0) { // FlxArrayUtil.swapAndPop is inlined
+				nps[i] = nps[nps.length - 1];
 				nps.pop();
 			}
 		}
 
-		if (save.data.accHoldToAcc && state.playerStrumline != null) {
+		if (save.data.accHoldToAcc) {
 			if (!save.data.simpleAcc) score = state.songScore;
-
-			if (songPos > lastSongPos) {
+			if (songPos > lastSongPos && state.playerStrumline != null) {
 				var addScore:Int;
-				for (hold in state.playerStrumline.holdNotes.group.members) {
-					if (hold == null || !hold.alive || songPos <= hold.strumTime) continue;
-
+				for (hold in state.playerStrumline.holdNotes.group.members) if (hold != null && hold.alive && songPos > hold.strumTime) {
 					addScore = songPos < hold.noteData.length + hold.strumTime ? Math.floor(Constants.SCORE_HOLD_BONUS_PER_SECOND * elapsed) : 0;
-					
-					// Implement this whenever they fixed delta-time specified only hold bonus scores.
+					// Implement this instead whenever they fixed delta-time specified only hold bonus scores.
 					//addScore = Constants.SCORE_HOLD_BONUS_PER_SECOND * 0.001 * Math.min(songPos - lastSongPos, Math.max(hold.noteData.length - hold.strumTime, 0));
 
 					maxScore += addScore;
@@ -540,17 +593,17 @@ class KadeHUDModule extends Module {
 
 			songPosBar.value = (songPos / state.currentSongLengthMs) * 100;
 			songPosBar.updateBar();
+
+			lastTimeLeft = timeLeft;
 		}
 
-		if (lastScore != score || lastMaxScore != maxScore) updateScoreText();
+		checkNoteStyleTemp();
+		updateScoreText();
 
-		lastScore = score;
-		lastMaxScore = maxScore;
-		lastTimeLeft = timeLeft;
 		lastSongPos = songPos;
 	}
 
-	function updateScoreText() {
+	function changeScoreText() {
 		//var tallies = Highscore.tallies;
 		//var notes = tallies.sick + (tallies.good * 0.785) + (tallies.bad * 0.65) + (tallies.shit * 0.3);
 		// (notes / (tallies.totalNotesHit + tallies.missed)
@@ -588,15 +641,15 @@ class KadeHUDModule extends Module {
 	];
 
 	function getRating(acc:Float):String {
-		var tallies = Highscore.tallies, misses = tapMissed + comboBreaks, fc:String;
+		var misses = tapMissed + comboBreaks, fc:String;
 		if (misses > 0) {
 			if (misses < 10) fc = "SDCB";
 			else fc = "Clear";
 		}
 		else {
-			if (tallies.bad > 0 || tallies.shits > 0) fc = "FC";
-			else if (tallies.good > 0) fc = "GFC";
-			else if (tallies.sick > 0) fc = "SFC";
+			if (Highscore.tallies.bad > 0 || Highscore.tallies.shits > 0) fc = "FC";
+			else if (Highscore.tallies.good > 0) fc = "GFC";
+			else if (Highscore.tallies.sick > 0) fc = "SFC";
 			else fc = "N/A";
 		}
 
