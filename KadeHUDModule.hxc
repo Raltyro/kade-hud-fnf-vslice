@@ -21,6 +21,7 @@
 
 import funkin.graphics.FunkinSprite;
 import funkin.modding.module.Module;
+import funkin.save.Save;
 import funkin.play.notes.notestyle.NoteStyle;
 import funkin.play.notes.notestyle.ScriptedNoteStyle;
 import funkin.play.scoring.Scoring;
@@ -31,6 +32,7 @@ import funkin.ui.options.PreferencesMenu;
 import funkin.ui.mainmenu.MainMenuState;
 import funkin.util.Constants;
 import funkin.Conductor;
+import funkin.FunkinMemory;
 import funkin.Highscore;
 import funkin.Paths;
 import funkin.Preferences;
@@ -68,7 +70,7 @@ class KadeHUDModule extends Module {
 	var saveData:Dynamic;
 
 	private function initSave() {
-		if ((saveData = FlxG.save.data.kadehudvslice) == null) saveData = FlxG.save.data.kadehudvslice = {};
+		saveData = Save.instance.modOptions.get("kadehudvslice");
 
 		// default
 		if (saveData.enabled == null) saveData.enabled = true;
@@ -154,7 +156,7 @@ class KadeHUDModule extends Module {
 			trace("this OptionsMenu's is weird! trying to atleast fix it somehow.");
 			options.codex.setPage("options");
 
-			var exitToMainMenuCallback = state.exitToMainMenu;
+			var exitToMainMenuCallback = currentState.exitToMainMenu;
 			if (exitToMainMenuCallback != null) exitToMainMenuCallback = () -> {
 				options.codex.currentPage.enabled = false;
 				FlxG.switchState(() -> new MainMenuState());
@@ -205,12 +207,12 @@ class KadeHUDModule extends Module {
 
 	/**
 	 * This is where to store the current FlxState to access PlayState or any other states, and
-	 *  handling the state modification in runtime.
+	 *  handling the currentState modification in runtime.
 	 * 
-	 * In HScript, you can dynamically access a variable like state to PlayState exclusive variables.
-	 * whereas in normal Haxe, you would have to cast it everytime like cast(state, PlayState)
+	 * In HScript, you can dynamically access a variable like currentState to PlayState exclusive variables.
+	 * whereas in normal Haxe, you would have to cast it everytime like cast(currentState, PlayState)
 	 */
-	var state:FlxState;
+	var currentState:FlxState;
 	var inPlay:Bool = false;
 
 	override function onStateChangeBegin(e:StateChangeScriptEvent) {
@@ -219,14 +221,17 @@ class KadeHUDModule extends Module {
 	}
 
 	override function onStateChangeEnd(e:StateChangeScriptEvent) {
-		state = e.targetState;
+		currentState = e.targetState;
 
 		// Use Std.isOfType to check if this is PlayState or OptionsState.
-		if (Std.isOfType(state, PlayState)) onPlaystateEnter();
-		else if (Std.isOfType(state, OptionsState)) {
-			var options = state.optionsCodex.pages.get("options");
-			var modPreferences = state.optionsCodex.addPage("kadehud", buildModPreferencesMenu());
-			modPreferences.onExit.add(() -> modPreferences.codex.switchPage("options"));
+		if (Std.isOfType(currentState, PlayState)) onPlaystateEnter();
+		else if (Std.isOfType(currentState, OptionsState)) {
+			var options = currentState.optionsCodex.pages.get("options");
+			var modPreferences = currentState.optionsCodex.addPage("kadehud", buildModPreferencesMenu());
+			modPreferences.onExit.add(() -> {
+				modPreferences.codex.switchPage("options");
+				Save.flush();
+			});
 
 			addCustomOptionItems(options, [
 				{index: options.items.members.indexOf(options.items.getItem("PREFERENCES")) + 1,
@@ -317,39 +322,39 @@ class KadeHUDModule extends Module {
 		resetStats();
 
 		// I imagine there would be competitive players using this shitty mod, so i'd like to cache the judgments to not cause any lag spikes.
-		for (rating in ["sick", "good", "bad", "shit"]) FunkinSprite.cacheTexture(state.comboPopUps.noteStyle.buildJudgementSpritePath(rating));
-		if (saveData.perfectRating) FunkinSprite.cacheTexture(state.comboPopUps.noteStyle.buildJudgementSpritePath("sick") + "2");
+		for (rating in ["sick", "good", "bad", "shit"]) FunkinMemory.cacheTexture(currentState.comboPopUps.noteStyle.buildJudgementSpritePath(rating));
+		if (saveData.perfectRating) FunkinMemory.cacheTexture(currentState.comboPopUps.noteStyle.buildJudgementSpritePath("sick") + "2");
 
 		if (saveData.centerStrums) {
-			state.playerStrumline.x = FlxG.width * 0.75 - state.playerStrumline.width * 0.5;
-			state.opponentStrumline.x = FlxG.width * 0.25 -  state.opponentStrumline.width * 0.5;
+			currentState.playerStrumline.x = FlxG.width * 0.75 - currentState.playerStrumline.width * 0.5;
+			currentState.opponentStrumline.x = FlxG.width * 0.25 -  currentState.opponentStrumline.width * 0.5;
 		}
 
 		// Re-use the available scoreText on PlayState instead of making one, then make a temporary a really small FlxText to PlayState.scoreText.
 		// To not cause any crashes relating to Score Text not existing/memory leaks being rapidly changes.
 		// (Which kinda defeats the entire purpose?)
-		scoreText = state.scoreText;
-		state.scoreText = new FlxText(0, 0, 1000);
-		state.scoreText.visible = false;
-		state.scoreText.active = false;
+		scoreText = currentState.scoreText;
+		currentState.scoreText = new FlxText(0, 0, 1000);
+		currentState.scoreText.visible = false;
+		currentState.scoreText.active = false;
 
 		changeScoreText();
 
 		if (saveData.showSongInfo) {
-			state.add(kadeText = new FlxText(18, FlxG.height - 50, 0, state.currentChart.songArtist + "\n" + state.currentChart.songName + " - " + FlxStringUtil.toTitleCase(state.currentDifficulty), 20));
+			currentState.add(kadeText = new FlxText(18, FlxG.height - 50, 0, currentState.currentChart.songArtist + "\n" + currentState.currentChart.songName + " - " + FlxStringUtil.toTitleCase(currentState.currentDifficulty), 20));
 			kadeText.setFormat(Paths.font("vcr.ttf"), 16, -1, "left", FlxTextBorderStyle.OUTLINE_FAST, -16777216);
 			kadeText.zIndex = 802;
-			kadeText.cameras = [state.camHUD];
+			kadeText.cameras = [currentState.camHUD];
 		}
 
 		// Kinda stolen from Boloxd's Kade Timing mod, i thought just implement it to just one mod.
 		// And make the implementation much accurate.
 		if (saveData.showTiming) {
-			state.add(timingText = new FlxText(0, 0, 120, "").setFormat(Paths.font("pixel.otf"), 18, 0, "center", FlxTextBorderStyle.OUTLINE_FAST));
+			currentState.add(timingText = new FlxText(0, 0, 120, "").setFormat(Paths.font("pixel.otf"), 18, 0, "center", FlxTextBorderStyle.OUTLINE_FAST));
 			timingText.borderColor = 0xFF000000;
 			timingText.borderSize = 2;
 			timingText.zIndex = 801;
-			timingText.cameras = [state.camHUD];
+			timingText.cameras = [currentState.camHUD];
 		}
 
 		if (saveData.showTimer) {
@@ -359,7 +364,7 @@ class KadeHUDModule extends Module {
 			songPosOverlay.zIndex = 802;
 
 			songPosBar = new FlxBar(songPosOverlay.x + 2, songPosOverlay.y + 2, null, songPosOverlay.width - 4, 1);
-			songPosBar.createGradientBar([0xAF000000], [Constants.COLOR_HEALTH_BAR_GREEN, Constants.COLOR_HEALTH_BAR_RED]);
+			songPosBar.createGradientBar([0xAF000000], [0xFF82EBCF, 0xFFF4FF9B]);
 			songPosBar.scale.y = songPosOverlay.height - 4;
 			songPosBar.numDivisions = Math.min(songPosBar.width, 1024);
 			songPosBar.zIndex = 801;
@@ -372,7 +377,7 @@ class KadeHUDModule extends Module {
 
 			for (member in [songPosText, songPosBar, songPosOverlay]) {
 				member.alpha = 0;
-				member.cameras = [state.camHUD];
+				member.cameras = [currentState.camHUD];
 			}
 
 			if (tweenSongPosNext) {
@@ -388,7 +393,7 @@ class KadeHUDModule extends Module {
 	var tweenSongPosNext:Bool = false;
 	private function tweenSongPos() {
 		for (member in [songPosBar, songPosOverlay, songPosText]) {
-			state.add(member);
+			currentState.add(member);
 			FlxTween.tween(member, {alpha: 1}, 1, {ease: FlxEase.circOut});
 		}
 	}
@@ -424,8 +429,8 @@ class KadeHUDModule extends Module {
 	var tempNoteStyleSickPath:String;
 	var tempNoteStyleSickData:Dynamic;
 	private function checkNoteStyleTemp() if (doCheckNoteStyleTemp) {
-		state.comboPopUps.noteStyle._data.fallback = tempNoteStyleFallback;
-		state.comboPopUps.noteStyle._data.assets.judgementSick = tempNoteStyleSickData;
+		currentState.comboPopUps.noteStyle._data.fallback = tempNoteStyleFallback;
+		currentState.comboPopUps.noteStyle._data.assets.judgementSick = tempNoteStyleSickData;
 		tempNoteStyleSickData.assetPath = tempNoteStyleSickPath;
 		doCheckNoteStyleTemp = false;
 	}
@@ -461,13 +466,13 @@ class KadeHUDModule extends Module {
 			}
 		}
 		else if (saveData.accHoldToAcc)
-			score = state.songScore;
+			score = currentState.songScore;
 		else // If the current configuration do not account holds to accuracy, use the custom score instead.
 			score += e.score;
 
 		// AGHH i don't like how to do this cuz like setting e.judgement is nono and makes gf to play drop down combo anim
 		if (saveData.perfectRating && e.score == Scoring.PBOT1_MAX_SCORE && e.judgement == "sick") {
-			var noteStyleData = state.comboPopUps.noteStyle._data;
+			var noteStyleData = currentState.comboPopUps.noteStyle._data;
 			if (doCheckNoteStyleTemp) {
 				noteStyleData.assets.judgementSick = tempNoteStyleSickData;
 				noteStyleData.fallback = tempNoteStyleFallback;
@@ -482,7 +487,7 @@ class KadeHUDModule extends Module {
 				}
 			}
 
-			state.comboPopUps.displayRating("sick");
+			currentState.comboPopUps.displayRating("sick");
 
 			noteStyleData.assets.judgementSick = null;
 			noteStyleData.fallback = null;
@@ -492,7 +497,7 @@ class KadeHUDModule extends Module {
 
 		if (saveData.showTiming) {
 			// Show the timing difference label if a note has hit.
-			timingText.setPosition(FlxG.width * 0.474 + 50 + state.comboPopUps.offsets[0], FlxG.height * 0.45 - 20 + state.comboPopUps.offsets[1]);
+			timingText.setPosition(FlxG.width * 0.474 + 50 + currentState.comboPopUps.offsets[0], FlxG.height * 0.45 - 20 + currentState.comboPopUps.offsets[1]);
 			timingText.text = FlxMath.roundDecimal(e.hitDiff, 2) + "ms";
 			timingText.alpha = 1.0;
 
@@ -576,10 +581,10 @@ class KadeHUDModule extends Module {
 		}
 
 		if (saveData.accHoldToAcc) {
-			if (!saveData.simpleAcc) score = state.songScore;
-			if (songPos > lastSongPos && state.playerStrumline != null) {
+			if (!saveData.simpleAcc) score = currentState.songScore;
+			if (songPos > lastSongPos && currentState.playerStrumline != null) {
 				var addScore:Int;
-				for (hold in state.playerStrumline.holdNotes.group.members) if (hold != null && hold.alive && songPos > hold.strumTime) {
+				for (hold in currentState.playerStrumline.holdNotes.group.members) if (hold != null && hold.alive && songPos > hold.strumTime) {
 					addScore = songPos < hold.noteData.length + hold.strumTime ? Math.floor(Constants.SCORE_HOLD_BONUS_PER_SECOND * elapsed) : 0;
 					// Implement this instead whenever they fixed delta-time specified only hold bonus scores.
 					//addScore = Constants.SCORE_HOLD_BONUS_PER_SECOND * 0.001 * Math.min(songPos - lastSongPos, Math.max(hold.noteData.length - hold.strumTime, 0));
@@ -591,10 +596,10 @@ class KadeHUDModule extends Module {
 		}
 
 		if (saveData.showTimer) {
-			if ((timeLeft = Math.floor((state.currentSongLengthMs - songPos) * 0.001)) != lastTimeLeft)
-				songPosText.text = state.currentChart.songName + " (" + FlxStringUtil.formatTime(timeLeft, false) + ")";
+			if ((timeLeft = Math.floor((currentState.currentSongLengthMs - songPos) * 0.001)) != lastTimeLeft)
+				songPosText.text = currentState.currentChart.songName + " (" + FlxStringUtil.formatTime(timeLeft, false) + ")";
 
-			songPosBar.value = (songPos / state.currentSongLengthMs) * 100;
+			songPosBar.value = (songPos / currentState.currentSongLengthMs) * 100;
 			songPosBar.updateBar();
 
 			lastTimeLeft = timeLeft;
@@ -611,7 +616,7 @@ class KadeHUDModule extends Module {
 		//var notes = tallies.sick + (tallies.good * 0.785) + (tallies.bad * 0.65) + (tallies.shit * 0.3);
 		// (notes / (tallies.totalNotesHit + tallies.missed)
 		var acc = maxScore < 1 ? 0 : (score / maxScore) * 100;
-		var text = "Score: " + state.songScore;
+		var text = "Score: " + currentState.songScore;
 
 		if (saveData.showNPS) text = "NPS: " + nps.length + " | " + text;
 
@@ -621,7 +626,7 @@ class KadeHUDModule extends Module {
 		text += " | Accuracy: " + FlxMath.roundDecimal(acc, 2) + "% | " + getRating(acc);
 
 		scoreText.text = text;
-		scoreText.setPosition(state.healthBar.x + (state.healthBar.width - scoreText.width) * 0.5, state.healthBar.y + 33);
+		scoreText.setPosition(currentState.healthBar.x + (currentState.healthBar.width - scoreText.width) * 0.5, currentState.healthBar.y + 33);
 	}
 
 	// Stolen from Kade Engine probably? not sure this is old code.
