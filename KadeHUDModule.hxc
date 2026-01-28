@@ -230,7 +230,7 @@ class KadeHUDModule extends Module {
 			var modPreferences = currentState.optionsCodex.addPage("kadehud", buildModPreferencesMenu());
 			modPreferences.onExit.add(() -> {
 				modPreferences.codex.switchPage("options");
-				Save.flush();
+				Save.system.flush();
 			});
 
 			addCustomOptionItems(options, [
