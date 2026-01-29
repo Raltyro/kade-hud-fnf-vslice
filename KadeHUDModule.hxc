@@ -30,7 +30,11 @@ import funkin.ui.options.OptionsState;
 import funkin.ui.options.OptionsMenu;
 import funkin.ui.options.PreferencesMenu;
 import funkin.ui.mainmenu.MainMenuState;
+import funkin.ui.TextMenuList;
 import funkin.util.Constants;
+import funkin.util.MemoryUtil;
+import funkin.util.PlatformUtil;
+import funkin.util.HostPlatform;
 import funkin.Conductor;
 import funkin.FunkinMemory;
 import funkin.Highscore;
@@ -55,12 +59,25 @@ class KadeHUDModule extends Module {
 	// Module & Saving Implementation in funkin.modding.IScriptedClass
 
 	/**
+	 * Used for disabling garbage collector to minimize stutters.
+	 */
+	var supportsMemoryUtil:Bool;
+
+	/**
+	 * Indicates if the current platform player is running is a mobile
+	 */
+	var isMobile:Bool;
+
+	/**
 	 * The module constructor is only (ModuleID, Priority)
 	 * ModuleID has to be different with the other activated mods modules.
 	 * Priority is the order runtime for this module. Higher being the first module to run.
 	 */
 	public function new() {
-		super("KadeHUD", 1);
+		super("KadeHUD", 9999);
+		var platform = PlatformUtil.detectHostPlatform();
+		isMobile = platform == HostPlatform.ANDROID || platform == HostPlatform.IOS;
+		supportsMemoryUtil = MemoryUtil.supportsTaskMem();
 		initSave();
 	}
 
@@ -70,6 +87,7 @@ class KadeHUDModule extends Module {
 	var saveData:Dynamic;
 
 	private function initSave() {
+		// getModOptions and setModOptions didn't exists yet in 0.8.0-0.8.1 mobile release.
 		final saveModID = "kadehudvslice";
 		if (Save.instance.modOptions.exists(saveModID)) saveData = Save.instance.modOptions.get(saveModID);
 		else Save.instance.modOptions.set(saveModID, saveData = {});
@@ -81,10 +99,12 @@ class KadeHUDModule extends Module {
 		if (saveData.showNPS == null) saveData.showNPS = false;
 		if (saveData.showTapMisses == null) saveData.showTapMisses = true;
 		if (saveData.showTimer == null) saveData.showTimer = true;
-		if (saveData.showSongInfo == null) saveData.showSongInfo = true;
 		if (saveData.showTiming == null) saveData.showTiming = false;
-		if (saveData.centerStrums == null) saveData.centerStrums = true;
 		if (saveData.perfectRating == null) saveData.perfectRating = true;
+		if (saveData.disableGitaroo == null) saveData.disableGitaroo = true;
+		if (saveData.disableGC == null) saveData.disableGC = true;
+		if (saveData.showSongInfo == null) saveData.showSongInfo = true;
+		if (saveData.centerStrums == null) saveData.centerStrums = true;
 	}
 
 	/**
@@ -107,14 +127,35 @@ class KadeHUDModule extends Module {
 		initSave();
 
 		// Destroy a pre-built Preferences Menu then make our own.
-		for (item in menu.items) item.destroy();
+		menu.remove(menu.items);
+		menu.items.destroy();
+
+		menu.items = new TextMenuList();
+		menu.add(menu.items);
+		menu.items.onChange.add((selected) -> menu.itemDesc.text = menu.preferenceDesc[menu.items.selectedIndex]);
+
+		if (isMobile) {
+			// Fix where MenuList uses hardcoded cameras.list[1] for TouchUtil detection.
+			// Hacky but it works... only for this menu, yeah.
+			var menuCamera = menu.menuCamera;
+			var prevCamera = FlxG.cameras.list[1];
+			var cameraIdx = FlxG.cameras.list.indexOf(menuCamera);
+			FlxG.cameras.list[1] = menuCamera;
+			FlxG.cameras.list[cameraIdx] = prevCamera;
+		}
+
 		for (item in menu.preferenceItems) item.destroy();
-		menu.items.clear();
 		menu.preferenceItems.clear();
 		menu.preferenceDesc = [];
 
 		menu.createPrefItemCheckbox("Enable Kade HUD", "Enables this Kade Engine HUD Mod.",
 			(value) -> saveData.enabled = value, saveData.enabled);
+
+		menu.createPrefItemCheckbox("Minimize Stutters", "If enabled, Minimizes the stuttering caused by garbage collector with the downside of having more memory usage.",
+			(value) -> saveData.disableGC = value, saveData.disableGC);
+
+		menu.createPrefItemCheckbox("No Easter Egg Gitaroo", "If enabled, Disables the random gitaroo menu when going to pause menu or on death.",
+			(value) -> saveData.disableGitaroo = value, saveData.disableGitaroo);
 
 		menu.createPrefItemCheckbox("Show Perfect Rating", "If enabled, Perfect Timing will be shown seperately as a judgement.",
 			(value) -> saveData.perfectRating = value, saveData.perfectRating);
@@ -137,11 +178,13 @@ class KadeHUDModule extends Module {
 		menu.createPrefItemCheckbox("Timer Bar", "If enabled, this'll show a timer bar on top of the screen.",
 			(value) -> saveData.showTimer = value, saveData.showTimer);
 
-		menu.createPrefItemCheckbox("Song Info Counter", "If enabled, this'll show information text about the current song on the left bottom corner of the screen.",
-			(value) -> saveData.showSongInfo = value, saveData.showSongInfo);
+		if (!isMobile) {
+			menu.createPrefItemCheckbox("Song Info Counter", "If enabled, this'll show information text about the current song on the left bottom corner of the screen.",
+				(value) -> saveData.showSongInfo = value, saveData.showSongInfo);
 
-		menu.createPrefItemCheckbox("Center Strumlines", "If enabled, this'll center the strums like in Kade Engine.",
-			(value) -> saveData.centerStrums = value, saveData.centerStrums);
+			menu.createPrefItemCheckbox("Center Strumlines", "If enabled, this'll center the strums like in Kade Engine.",
+				(value) -> saveData.centerStrums = value, saveData.centerStrums);
+		}
 
 		menu.itemDesc.text = menu.preferenceDesc[menu.items.selectedIndex];
 
@@ -158,14 +201,11 @@ class KadeHUDModule extends Module {
 			trace("this OptionsMenu's is weird! trying to atleast fix it somehow.");
 			options.codex.setPage("options");
 
-			var exitToMainMenuCallback = currentState.exitToMainMenu;
-			if (exitToMainMenuCallback != null) exitToMainMenuCallback = () -> {
-				options.codex.currentPage.enabled = false;
-				FlxG.switchState(() -> new MainMenuState());
-			};
-			options.onExit.add(exitToMainMenuCallback);
-
-			if (options.items.getItem("EXIT") == null) customItems.push({index: 999999, label: "EXIT", callback: options.exit});
+			options.onExit.add(currentState.exitToMainMenu);
+			options.codex.pages.get("controls").onExit.add(currentState.exitControls);
+			options.codex.pages.get("preferences").onExit.add(() -> options.codex.switchPage("options"));
+			if (options.codex.pages.exists("offsets")) options.codex.pages.get("offsets").onExit.add(currentState.exitOffsets);
+			options.codex.pages.get("saveData").onExit.add(() -> options.codex.switchPage("options"));
 		}
 
 		// They fucked up the hscript parser somehow, so doing items.push(item = createItem) just creates the item thrice.
@@ -186,10 +226,10 @@ class KadeHUDModule extends Module {
 			var item = items[itemID];
 			item.y = y += 100;
 
-			if (id == options.items.selectedIndex) {
-				item.select();
-				if (members[id] != null) members[id].idle();
-			}
+			//if (id == options.items.selectedIndex) {
+			//	item.select();
+			//	if (members[id] != null) members[id].idle();
+			//}
 
 			options.items.insert(id, item);
 			id++;
@@ -203,6 +243,16 @@ class KadeHUDModule extends Module {
 			if (item != null) item.y = y += 100;
 			id++;
 		}
+
+		// fix the awful positioning on camera positions.
+		var options = options;
+		function fixOnMenuChange(selected) {
+			options.camFocusPoint.y = selected.y + selected.height * 0.5;
+		}
+		options.items.onChange.remove(options.onMenuChange);
+		options.items.onChange.add(fixOnMenuChange);
+		fixOnMenuChange(options.items.members[0]);
+		options.items.selectItem(OptionsState.rememberedSelectedIndex);
 	}
 
 	// Options & PlayState handling in funkin.modding.IScriptedClass.IStateChangingScriptedClass
@@ -218,15 +268,15 @@ class KadeHUDModule extends Module {
 	var inPlay:Bool = false;
 
 	override function onStateChangeBegin(e:StateChangeScriptEvent) {
-		inPlay = false;
 		cleanup();
+		if (inPlay && !Std.isOfType(FlxG.game._nextState, PlayState)) onPlayStateExit();
 	}
 
 	override function onStateChangeEnd(e:StateChangeScriptEvent) {
 		currentState = e.targetState;
 
 		// Use Std.isOfType to check if this is PlayState or OptionsState.
-		if (Std.isOfType(currentState, PlayState)) onPlaystateEnter();
+		if (Std.isOfType(currentState, PlayState)) onPlayStateEnter();
 		else if (Std.isOfType(currentState, OptionsState)) {
 			var options = currentState.optionsCodex.pages.get("options");
 			var modPreferences = currentState.optionsCodex.addPage("kadehud", buildModPreferencesMenu());
@@ -311,11 +361,17 @@ class KadeHUDModule extends Module {
 		score = 0;
 	}
 
+	private function onPlayStateExit() {
+		inPlay = false;
+
+		if (supportsMemoryUtil && saveData.disableGC) MemoryUtil.enable();
+	}
+
 	/**
 	 * This is where it implant the mod Kade HUD to PlayState.
 	 * More explanation at the codes.
 	 */
-	private function onPlaystateEnter() {
+	private function onPlayStateEnter() {
 		inPlay = true;
 
 		cleanup();
@@ -323,11 +379,16 @@ class KadeHUDModule extends Module {
 
 		resetStats();
 
+		if (supportsMemoryUtil && saveData.disableGC) {
+			MemoryUtil.collect(true);
+			MemoryUtil.disable();
+		}
+
 		// I imagine there would be competitive players using this shitty mod, so i'd like to cache the judgments to not cause any lag spikes.
 		for (rating in ["sick", "good", "bad", "shit"]) FunkinMemory.cacheTexture(currentState.comboPopUps.noteStyle.buildJudgementSpritePath(rating));
 		if (saveData.perfectRating) FunkinMemory.cacheTexture(currentState.comboPopUps.noteStyle.buildJudgementSpritePath("sick") + "2");
 
-		if (saveData.centerStrums) {
+		if (!isMobile && saveData.centerStrums) {
 			currentState.playerStrumline.x = FlxG.width * 0.75 - currentState.playerStrumline.width * 0.5;
 			currentState.opponentStrumline.x = FlxG.width * 0.25 -  currentState.opponentStrumline.width * 0.5;
 		}
@@ -339,10 +400,11 @@ class KadeHUDModule extends Module {
 		currentState.scoreText = new FlxText(0, 0, 1000);
 		currentState.scoreText.visible = false;
 		currentState.scoreText.active = false;
+		currentState.scoreText.zIndex = 804;
 
 		changeScoreText();
 
-		if (saveData.showSongInfo) {
+		if (!isMobile && saveData.showSongInfo) {
 			currentState.add(kadeText = new FlxText(18, FlxG.height - 50, 0, currentState.currentChart.songArtist + "\n" + currentState.currentChart.songName + " - " + FlxStringUtil.toTitleCase(currentState.currentDifficulty), 20));
 			kadeText.setFormat(Paths.font("vcr.ttf"), 16, -1, "left", FlxTextBorderStyle.OUTLINE_FAST, -16777216);
 			kadeText.zIndex = 802;
@@ -389,6 +451,8 @@ class KadeHUDModule extends Module {
 		}
 		else
 			tweenSongPosNext = false;
+
+		currentState.refresh();
 	}
 
 	// Not sure what was this for exactly, this just existed way back in the old version of this mod.
@@ -512,8 +576,6 @@ class KadeHUDModule extends Module {
 			FlxTween.cancelTweensOf(timingText);
 			FlxTween.tween(timingText, {alpha: 0}, 0.2, {startDelay: 0.1});
 		}
-
-		updateScoreText();
 	}
 
 	/**
@@ -530,8 +592,6 @@ class KadeHUDModule extends Module {
 		score -= 10; // this one is hardcoded...
 		prevCombos = Highscore.tallies.combo;
 		comboBreaks += 1;
-
-		if (saveData.simpleAcc || !saveData.accHoldToAcc) updateScoreText();
 	}
 
 
@@ -548,8 +608,6 @@ class KadeHUDModule extends Module {
 
 		score += e.scoreChange;
 		tapMissed += 1;
-
-		updateScoreText();
 	}
 
 	private function updateScoreText() {
@@ -564,6 +622,8 @@ class KadeHUDModule extends Module {
 	 */
 	override function onUpdate(e:UpdateScriptEvent) {
 		if (!inPlay || !saveData.enabled) return;
+
+		if (supportsMemoryUtil && saveData.disableGC) MemoryUtil.disable();
 
 		if (prevCombos > 0 && Highscore.tallies.combo <= Math.min(prevCombos, 0)) comboBreaks += 1;
 		prevCombos = Highscore.tallies.combo;
@@ -611,6 +671,24 @@ class KadeHUDModule extends Module {
 		updateScoreText();
 
 		lastSongPos = songPos;
+	}
+
+	/**
+	 * e.gitaroo
+	 */
+	override function onPause(e:PauseScriptEvent) {
+		if (saveData.disableGitaroo) e.gitaroo = false;
+		if (supportsMemoryUtil && saveData.disableGC) {
+			MemoryUtil.enable();
+			MemoryUtil.collect(true);
+		}
+	}
+
+	/**
+	 * none
+	 */
+	override function onResume(e:ScriptEvent) {
+		if (supportsMemoryUtil && saveData.disableGC) MemoryUtil.disable();
 	}
 
 	private function changeScoreText() {
