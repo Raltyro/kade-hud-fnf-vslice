@@ -70,7 +70,9 @@ class KadeHUDModule extends Module {
 	var saveData:Dynamic;
 
 	private function initSave() {
-		saveData = Save.instance.getModOptions("kadehudvslice");
+		final saveModID = "kadehudvslice";
+		if (Save.instance.modOptions.exists(saveModID)) saveData = Save.instance.modOptions.get(saveModID);
+		else Save.instance.modOptions.set(saveModID, saveData = {});
 
 		// default
 		if (saveData.enabled == null) saveData.enabled = true;
