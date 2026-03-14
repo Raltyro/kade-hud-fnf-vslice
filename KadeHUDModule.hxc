@@ -5,6 +5,8 @@
  * First made on 2 May 2024 Alongside with Nebula Zorua's COOLHUD V-Slice.
  * Second update at 7 June 2025.
  * Third Update at 22 July 2025. (For to fix the FlxSave blacklist.)
+ * From now on the updates are no longer documented.
+ * 
  * FNF V-Slice (0.3.0, WeekEnd1 Update) was first publicly released on 1 May 2024,
  *  then it's source code released publicly at GitHub FunkinCrew, previously ninjamuffin99 Github's
  *  on May 6 2024.
@@ -42,6 +44,8 @@ import funkin.Paths;
 import funkin.Preferences;
 
 import flixel.math.FlxMath;
+import flixel.text.FlxBitmapFont;
+import flixel.text.FlxBitmapText;
 import flixel.text.FlxTextBorderStyle;
 import flixel.text.FlxText;
 import flixel.tweens.FlxEase;
@@ -102,9 +106,10 @@ class KadeHUDModule extends Module {
 		if (saveData.showTiming == null) saveData.showTiming = false;
 		if (saveData.perfectRating == null) saveData.perfectRating = true;
 		if (saveData.disableGitaroo == null) saveData.disableGitaroo = true;
-		if (saveData.disableGC == null) saveData.disableGC = true;
+		//if (saveData.disableGC == null) saveData.disableGC = false;
 		if (saveData.showSongInfo == null) saveData.showSongInfo = true;
 		if (saveData.centerStrums == null) saveData.centerStrums = true;
+		if (saveData.hideNotesplashes == null) saveData.hideNotesplashes = false;
 	}
 
 	/**
@@ -151,8 +156,11 @@ class KadeHUDModule extends Module {
 		menu.createPrefItemCheckbox("Enable Kade HUD", "Enables this Kade Engine HUD Mod.",
 			(value) -> saveData.enabled = value, saveData.enabled);
 
-		menu.createPrefItemCheckbox("Minimize Stutters", "If enabled, Minimizes the stuttering caused by garbage collector with the downside of having more memory usage.",
-			(value) -> saveData.disableGC = value, saveData.disableGC);
+		//menu.createPrefItemCheckbox("Minimize Stutters", "If enabled, Minimizes the stuttering caused by garbage collector with the downside of having more memory usage.",
+		//	(value) -> saveData.disableGC = value, saveData.disableGC);
+
+		menu.createPrefItemCheckbox("Hide Note Splashes", "Hides the note splashes, just like the original Kade Engine HUD.",
+			(value) -> saveData.hideNotesplashes = value, saveData.hideNotesplashes);
 
 		menu.createPrefItemCheckbox("No Easter Egg Gitaroo", "If enabled, Disables the random gitaroo menu when going to pause menu or on death.",
 			(value) -> saveData.disableGitaroo = value, saveData.disableGitaroo);
@@ -178,13 +186,13 @@ class KadeHUDModule extends Module {
 		menu.createPrefItemCheckbox("Timer Bar", "If enabled, this'll show a timer bar on top of the screen.",
 			(value) -> saveData.showTimer = value, saveData.showTimer);
 
-		if (!isMobile) {
-			menu.createPrefItemCheckbox("Song Info Counter", "If enabled, this'll show information text about the current song on the left bottom corner of the screen.",
-				(value) -> saveData.showSongInfo = value, saveData.showSongInfo);
+		menu.createPrefItemCheckbox("Song Info Counter", "If enabled, this'll show information text about the current song on the left bottom corner of the screen.",
+			(value) -> saveData.showSongInfo = value, saveData.showSongInfo);
 
+		//if (!isMobile) {
 			menu.createPrefItemCheckbox("Center Strumlines", "If enabled, this'll center the strums like in Kade Engine.",
 				(value) -> saveData.centerStrums = value, saveData.centerStrums);
-		}
+		//}
 
 		menu.itemDesc.text = menu.preferenceDesc[menu.items.selectedIndex];
 
@@ -305,12 +313,13 @@ class KadeHUDModule extends Module {
 	 * Define cleanup for to call/reuse the variables on onDestroy, onPlayStateEnter, onStateChangeEnd
 	 *  (just incase), this is for to avoid memory leaks.
 	 */
-	var scoreText:FlxText;
-	var timingText:FlxText;
+	var scoreText:FlxBitmapText;
+	var timingText:FlxBitmapText;
 	var kadeText:FlxText;
 	var songPosOverlay:FunkinSprite;
 	var songPosBar:FlxBar;
-	var songPosText:FlxText;
+	var songNameText:FlxText;
+	var songPosText:FlxBitmapText;
 
 	private function cleanup() {
 		if (scoreText != null) scoreText.destroy();
@@ -334,19 +343,21 @@ class KadeHUDModule extends Module {
 	 *  to not causes any more changes to text or waste computing time on the same tallies.
 	 * 
 	 * nps - for NPS, obviously, it acts like a timer inserting itself from 1 then decrementing by delta
+	 * 
+	 * Since 0.8.3, score are now float instead of integer.
 	 */
 	var comboBreaks:Int;
 	var tapMissed:Int;
 
 	var lastSongPos:Float;
 	var lastTimeLeft:Int = 0;
-	var lastScore:Int = 0;
-	var lastMaxScore:Int = 0;
+	var lastScore:Float = 0;
+	var lastMaxScore:Float = 0;
 	var nps:Array<Float> = [];
 
 	var prevCombos:Int;
-	var maxScore:Int;
-	var score:Int;
+	var maxScore:Float;
+	var score:Float;
 	var timeLeft:Int;
 
 	private function resetStats() {
@@ -357,14 +368,14 @@ class KadeHUDModule extends Module {
 		nps.resize(0);
 
 		prevCombos = 0;
-		maxScore = 0;
-		score = 0;
+		maxScore = 0.0;
+		score = 0.0;
 	}
 
 	private function onPlayStateExit() {
 		inPlay = false;
 
-		if (supportsMemoryUtil && saveData.disableGC) MemoryUtil.enable();
+		//if (supportsMemoryUtil && saveData.disableGC) MemoryUtil.enable();
 	}
 
 	/**
@@ -379,10 +390,10 @@ class KadeHUDModule extends Module {
 
 		resetStats();
 
-		if (supportsMemoryUtil && saveData.disableGC) {
+		/*if (supportsMemoryUtil && saveData.disableGC) {
 			MemoryUtil.collect(true);
 			MemoryUtil.disable();
-		}
+		}*/
 
 		// I imagine there would be competitive players using this shitty mod, so i'd like to cache the judgments to not cause any lag spikes.
 		for (rating in ["sick", "good", "bad", "shit"]) FunkinMemory.cacheTexture(currentState.comboPopUps.noteStyle.buildJudgementSpritePath(rating));
@@ -395,9 +406,10 @@ class KadeHUDModule extends Module {
 
 		// Re-use the available scoreText on PlayState instead of making one, then make a temporary a really small FlxText to PlayState.scoreText.
 		// To not cause any crashes relating to Score Text not existing/memory leaks being rapidly changes.
-		// (Which kinda defeats the entire purpose?)
 		scoreText = currentState.scoreText;
-		currentState.scoreText = new FlxText(0, 0, 1000);
+		var textFont = currentState.scoreText.font;
+
+		currentState.scoreText = new FlxBitmapText(0, 0, "", textFont);
 		currentState.scoreText.visible = false;
 		currentState.scoreText.active = false;
 		currentState.scoreText.zIndex = 804;
@@ -406,7 +418,7 @@ class KadeHUDModule extends Module {
 
 		if (!isMobile && saveData.showSongInfo) {
 			currentState.add(kadeText = new FlxText(18, FlxG.height - 50, 0, currentState.currentChart.songArtist + "\n" + currentState.currentChart.songName + " - " + FlxStringUtil.toTitleCase(currentState.currentDifficulty), 20));
-			kadeText.setFormat(Paths.font("vcr.ttf"), 16, -1, "left", FlxTextBorderStyle.OUTLINE_FAST, -16777216);
+			kadeText.setFormat(Paths.font("vcr.ttf"), 16, -1, "left", FlxTextBorderStyle.OUTLINE_FAST, 0xFF000000);
 			kadeText.zIndex = 802;
 			kadeText.cameras = [currentState.camHUD];
 		}
@@ -414,9 +426,12 @@ class KadeHUDModule extends Module {
 		// Kinda stolen from Boloxd's Kade Timing mod, i thought just implement it to just one mod.
 		// And make the implementation much accurate.
 		if (saveData.showTiming) {
-			currentState.add(timingText = new FlxText(0, 0, 120, "").setFormat(Paths.font("pixel.otf"), 18, 0, "center", FlxTextBorderStyle.OUTLINE_FAST));
+			currentState.add(timingText = new FlxBitmapText(0, 0, "", FlxBitmapFont.fromAngelCode(Paths.font("kadehud-timing.png"), Paths.font("kadehud-timing.fnt"))));
+			timingText.alignment = "center";
+			timingText.borderStyle = FlxTextBorderStyle.OUTLINE;
 			timingText.borderColor = 0xFF000000;
 			timingText.borderSize = 2;
+			timingText.letterSpacing = -1;
 			timingText.zIndex = 801;
 			timingText.cameras = [currentState.camHUD];
 		}
@@ -434,14 +449,32 @@ class KadeHUDModule extends Module {
 			songPosBar.zIndex = 801;
 			songPosBar.updateHitbox();
 
+			// songNameText and songPosText position are set later in update().
+			songNameText = new FlxText(0, Math.floor(songPosOverlay.y + (songPosBar.height - 24)), 0, currentState.currentChart.songName, 20);
+			songNameText.setFormat(Paths.font("vcr.ttf"), 20, -1, "left", FlxTextBorderStyle.OUTLINE, 0xFF000000);
+			songNameText.borderStyle = FlxTextBorderStyle.OUTLINE;
+			songNameText.borderColor = 0xFF000000;
+			songNameText.zIndex = 803;
+			songNameText.borderSize = 2;
+
+			songPosText = new FlxBitmapText(0, Math.floor(songPosOverlay.y + (songPosBar.height - 21)), "", textFont);
+			songPosText.fieldWidth = songPosOverlay.width;
+			songPosText.borderStyle = FlxTextBorderStyle.OUTLINE;
+			songPosText.borderColor = 0xFF000000;
+			songPosText.zIndex = 803;
+			songPosText.borderSize = 2;
+
+			/*
 			songPosText = new FlxText(songPosOverlay.x, Math.floor(songPosOverlay.y + (songPosBar.height - 15) * 0.5), songPosOverlay.width, "", 20);
 			songPosText.setFormat(Paths.font("vcr.ttf"), 20, -1, "center", FlxTextBorderStyle.OUTLINE_FAST, -16777216);
 			songPosText.zIndex = 803;
 			songPosText.borderSize = 2;
+			*/
 
-			for (member in [songPosText, songPosBar, songPosOverlay]) {
+			for (member in [songNameText, songPosText, songPosBar, songPosOverlay]) {
 				member.alpha = 0;
 				member.cameras = [currentState.camHUD];
+				currentState.add(member);
 			}
 
 			if (tweenSongPosNext) {
@@ -458,8 +491,7 @@ class KadeHUDModule extends Module {
 	// Not sure what was this for exactly, this just existed way back in the old version of this mod.
 	var tweenSongPosNext:Bool = false;
 	private function tweenSongPos() {
-		for (member in [songPosBar, songPosOverlay, songPosText]) {
-			currentState.add(member);
+		for (member in [songPosBar, songPosOverlay, songNameText, songPosText]) {
 			FlxTween.tween(member, {alpha: 1}, 1, {ease: FlxEase.circOut});
 		}
 	}
@@ -576,6 +608,10 @@ class KadeHUDModule extends Module {
 			FlxTween.cancelTweensOf(timingText);
 			FlxTween.tween(timingText, {alpha: 0}, 0.2, {startDelay: 0.1});
 		}
+
+		if (saveData.hideNotesplashes) {
+			e.doesNotesplash = false;
+		}
 	}
 
 	/**
@@ -589,7 +625,7 @@ class KadeHUDModule extends Module {
 		if (/*e.eventCanceled ||*/ !inPlay || !saveData.enabled || e.note.noteData.data >= 4) return;
 
 		maxScore += Scoring.PBOT1_MAX_SCORE;
-		score -= 10; // this one is hardcoded...
+		score -= Scoring.getMissScore();
 		prevCombos = Highscore.tallies.combo;
 		comboBreaks += 1;
 	}
@@ -623,7 +659,7 @@ class KadeHUDModule extends Module {
 	override function onUpdate(e:UpdateScriptEvent) {
 		if (!inPlay || !saveData.enabled) return;
 
-		if (supportsMemoryUtil && saveData.disableGC) MemoryUtil.disable();
+		//if (supportsMemoryUtil && saveData.disableGC) MemoryUtil.disable();
 
 		if (prevCombos > 0 && Highscore.tallies.combo <= Math.min(prevCombos, 0)) comboBreaks += 1;
 		prevCombos = Highscore.tallies.combo;
@@ -645,9 +681,10 @@ class KadeHUDModule extends Module {
 		if (saveData.accHoldToAcc) {
 			if (!saveData.simpleAcc) score = currentState.songScore;
 			if (songPos > lastSongPos && currentState.playerStrumline != null) {
-				var addScore:Int;
+				var addScore:Float;
 				for (hold in currentState.playerStrumline.holdNotes.group.members) if (hold != null && hold.alive && songPos > hold.strumTime) {
-					addScore = songPos < hold.noteData.length + hold.strumTime ? Math.floor(Constants.SCORE_HOLD_BONUS_PER_SECOND * elapsed) : 0;
+					addScore = songPos < hold.noteData.length + hold.strumTime ? Constants.SCORE_HOLD_BONUS_PER_SECOND * elapsed : 0;
+
 					// Implement this instead whenever they fixed delta-time specified only hold bonus scores.
 					//addScore = Constants.SCORE_HOLD_BONUS_PER_SECOND * 0.001 * Math.min(songPos - lastSongPos, Math.max(hold.noteData.length - hold.strumTime, 0));
 
@@ -658,8 +695,13 @@ class KadeHUDModule extends Module {
 		}
 
 		if (saveData.showTimer) {
-			if ((timeLeft = Math.floor((currentState.currentSongLengthMs - songPos) * 0.001)) != lastTimeLeft)
-				songPosText.text = currentState.currentChart.songName + " (" + FlxStringUtil.formatTime(timeLeft, false) + ")";
+			if ((timeLeft = Math.floor((currentState.currentSongLengthMs - songPos) * 0.001)) != lastTimeLeft) {
+				songPosText.text = "(" + FlxStringUtil.formatTime(timeLeft, false) + ")";
+
+				var x = (FlxG.width - ((songPosText.x = songNameText.width + 8) + songPosText.width)) * 0.5;
+				songNameText.x = x;
+				songPosText.x += x;
+			}
 
 			songPosBar.value = (songPos / currentState.currentSongLengthMs) * 100;
 			songPosBar.updateBar();
@@ -678,17 +720,17 @@ class KadeHUDModule extends Module {
 	 */
 	override function onPause(e:PauseScriptEvent) {
 		if (saveData.disableGitaroo) e.gitaroo = false;
-		if (supportsMemoryUtil && saveData.disableGC) {
+		/*if (supportsMemoryUtil && saveData.disableGC) {
 			MemoryUtil.enable();
 			MemoryUtil.collect(true);
-		}
+		}*/
 	}
 
 	/**
 	 * none
 	 */
 	override function onResume(e:ScriptEvent) {
-		if (supportsMemoryUtil && saveData.disableGC) MemoryUtil.disable();
+		//if (supportsMemoryUtil && saveData.disableGC) MemoryUtil.disable();
 	}
 
 	private function changeScoreText() {
@@ -696,7 +738,7 @@ class KadeHUDModule extends Module {
 		//var notes = tallies.sick + (tallies.good * 0.785) + (tallies.bad * 0.65) + (tallies.shit * 0.3);
 		// (notes / (tallies.totalNotesHit + tallies.missed)
 		var acc = maxScore < 1 ? 0 : (score / maxScore) * 100;
-		var text = "Score: " + currentState.songScore;
+		var text = "Score: " + Math.floor(currentState.songScore);
 
 		if (saveData.showNPS) text = "NPS: " + nps.length + " | " + text;
 
